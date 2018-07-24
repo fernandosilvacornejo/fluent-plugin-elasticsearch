@@ -26,6 +26,7 @@ class Fluent::Plugin::ElasticsearchErrorHandler
     stats = Hash.new(0)
     meta = {}
     header = {}
+    type = nil
     chunk.msgpack_each do |time, rawrecord|
       bulk_message = ''
       next unless rawrecord.is_a? Hash
@@ -56,6 +57,12 @@ class Fluent::Plugin::ElasticsearchErrorHandler
         stats[:errors_bad_resp] += 1
         next
       end
+      if item[write_operation].has_key?('error') && item[write_operation]['error'].has_key?('type')
+        type = item[write_operation]['error']['type']
+      end
+      if item[write_operation].has_key?('error') && item[write_operation]['error'].has_key?('reason')
+        reason = item[write_operation]['error']['reason']
+      end
       case
       when [200, 201].include?(status)
         stats[:successes] += 1
@@ -63,10 +70,9 @@ class Fluent::Plugin::ElasticsearchErrorHandler
         stats[:duplicates] += 1
       when 400 == status
         stats[:bad_argument] += 1
-        @plugin.router.emit_error_event(tag, time, rawrecord, ElasticsearchError.new('400 - Rejected by Elasticsearch'))
+        @plugin.router.emit_error_event(tag, time, rawrecord, ElasticsearchError.new("400 - Rejected by Elasticsearch: #{type} - #{reason}"))
       else
-        if item[write_operation].has_key?('error') && item[write_operation]['error'].has_key?('type')
-          type = item[write_operation]['error']['type']
+        if type
           stats[type] += 1
           retry_stream.add(time, rawrecord)
         else
